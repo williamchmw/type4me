@@ -34,6 +34,7 @@ struct HistoryTab: View {
     @State private var exportRangeAll = true
     @State private var exportStart = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var exportEnd = Date()
+    @State private var exportRecordCount: Int = 0
 
     private var filtered: [HistoryRecord] {
         if searchText.isEmpty { return records }
@@ -247,8 +248,7 @@ struct HistoryTab: View {
                 .font(.system(size: 12))
             }
 
-            let count = exportCount
-            Text(L("共 \(count) 条记录", "\(count) records"))
+            Text(L("共 \(exportRecordCount) 条记录", "\(exportRecordCount) records"))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
 
@@ -265,20 +265,28 @@ struct HistoryTab: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
                     .background(RoundedRectangle(cornerRadius: 6).fill(TF.settingsNavActive))
-                    .disabled(count == 0)
+                    .disabled(exportRecordCount == 0)
             }
         }
         .padding(16)
         .frame(width: 320)
+        .onAppear { refreshExportCount() }
+        .onChange(of: exportRangeAll) { refreshExportCount() }
+        .onChange(of: exportStart) { refreshExportCount() }
+        .onChange(of: exportEnd) { refreshExportCount() }
     }
 
-    private var exportCount: Int {
-        if exportRangeAll {
-            return historyStore.count()
-        } else {
-            let startOfDay = Calendar.current.startOfDay(for: exportStart)
-            let endOfDay = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: exportEnd)) ?? exportEnd
-            return historyStore.count(from: startOfDay, to: endOfDay)
+    private func refreshExportCount() {
+        Task {
+            let c: Int
+            if exportRangeAll {
+                c = await historyStore.count()
+            } else {
+                let startOfDay = Calendar.current.startOfDay(for: exportStart)
+                let endOfDay = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: exportEnd)) ?? exportEnd
+                c = await historyStore.count(from: startOfDay, to: endOfDay)
+            }
+            await MainActor.run { exportRecordCount = c }
         }
     }
 

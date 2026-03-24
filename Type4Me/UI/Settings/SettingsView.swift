@@ -95,6 +95,9 @@ struct SettingsView: View {
         let showBadge = tab == .about && appState.hasUnseenUpdate
         return Button {
             selectedTab = tab
+            if tab == .about {
+                UpdateChecker.shared.markAsSeen(appState: appState)
+            }
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

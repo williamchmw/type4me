@@ -53,9 +53,6 @@ struct AboutTab: View {
                 .font(.system(size: 10))
                 .foregroundStyle(TF.settingsTextTertiary)
         }
-        .onAppear {
-            UpdateChecker.shared.markAsSeen(appState: appState)
-        }
     }
 
     // MARK: - Update Section

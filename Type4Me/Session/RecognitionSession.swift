@@ -516,17 +516,28 @@ actor RecognitionSession {
     // MARK: - ASR Events
 
     private func handleASREvent(_ event: RecognitionEvent) {
-        // Notify UI layer
+        switch event {
+        case .ready:
+            // Deduplicate: ASR clients may emit .ready, but we also emit it
+            // on first audio chunk via markReadyIfNeeded(). Route both through
+            // the same guard to avoid double-firing the start sound.
+            markReadyIfNeeded()
+            return  // markReadyIfNeeded calls onASREvent(.ready) internally
+
+        default:
+            break
+        }
+
+        // Notify UI layer for all non-ready events
         onASREvent?(event)
 
         switch event {
         case .ready:
-            break
+            break  // handled above
 
         case .transcript(let transcript):
             currentTranscript = transcript
             logger.info("Transcript updated: \(transcript.displayText)")
-            // Schedule speculative LLM during recording pauses
             if state == .recording && !currentMode.prompt.isEmpty {
                 scheduleSpeculativeLLM()
             }
@@ -536,18 +547,14 @@ actor RecognitionSession {
 
         case .completed:
             logger.info("ASR stream completed")
-            // Server-initiated disconnect while still recording: tear down gracefully
             if state == .recording {
                 NSLog("[Session] Server closed ASR while recording, initiating stop")
                 DebugFileLogger.log("server-initiated stop from recording state")
                 Task { await self.stopRecording() }
             }
 
-        case .processingResult:
-            break // Handled by UI layer via onASREvent callback
-
-        case .finalized:
-            break // Handled by UI layer via onASREvent callback
+        case .processingResult, .finalized:
+            break
         }
     }
 

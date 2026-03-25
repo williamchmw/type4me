@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-#if canImport(SherpaOnnxLib)
+#if HAS_SHERPA_ONNX
 
 /// One-shot offline speech recognizer using SherpaOnnx + Paraformer.
 ///
@@ -143,4 +143,4 @@ enum SherpaOfflineASRError: Error, LocalizedError {
     }
 }
 
-#endif  // canImport(SherpaOnnxLib)
+#endif  // HAS_SHERPA_ONNX

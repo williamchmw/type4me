@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-#if canImport(SherpaOnnxLib)
+#if HAS_SHERPA_ONNX
 
 /// Wraps the SherpaOnnx CT-Transformer punctuation model for adding
 /// punctuation to raw ASR output text.
@@ -60,4 +60,4 @@ final class SherpaPunctuationProcessor: @unchecked Sendable {
     }
 }
 
-#endif  // canImport(SherpaOnnxLib)
+#endif  // HAS_SHERPA_ONNX

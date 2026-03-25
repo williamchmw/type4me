@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-#if canImport(SherpaOnnxLib)
+#if HAS_SHERPA_ONNX
 
 /// Wraps SherpaOnnx's built-in Silero VAD for real-time voice activity detection.
 /// Not thread-safe — call from a single queue (the audio capture queue).

@@ -88,7 +88,7 @@ enum ASRProviderRegistry {
             .iflytek: ProviderEntry(configType: IflytekASRConfig.self, createClient: nil),
             .custom:  ProviderEntry(configType: CustomASRConfig.self,  createClient: nil),
         ]
-        #if canImport(SherpaOnnxLib)
+        #if HAS_SHERPA_ONNX
         dict[.sherpa] = ProviderEntry(
             configType: SherpaASRConfig.self,
             createClient: { SherpaASRClient() },

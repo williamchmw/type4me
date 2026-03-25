@@ -3,7 +3,7 @@
 
 import Foundation  // For NSString
 
-#if canImport(SherpaOnnxLib)
+#if HAS_SHERPA_ONNX
 import SherpaOnnxLib
 
 /// Convert a String from swift to a `const char*` so that we can pass it to
@@ -2001,4 +2001,4 @@ func getSherpaOnnxGitDate() -> String {
   return String(cString: SherpaOnnxGetGitDate())
 }
 
-#endif  // canImport(SherpaOnnxLib)
+#endif  // HAS_SHERPA_ONNX

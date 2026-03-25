@@ -558,7 +558,7 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
         testTask?.cancel()
         asrTestStatus = .testing
         testTask = Task {
-            #if canImport(SherpaOnnxLib)
+            #if HAS_SHERPA_ONNX
             do {
                 let config = SherpaASRConfig(credentials: ["modelDir": ModelManager.defaultModelsDir])
                 guard let config else {

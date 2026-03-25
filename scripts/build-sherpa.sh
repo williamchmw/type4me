@@ -68,6 +68,26 @@ else
     exit 1
 fi
 
+# 2.5 Merge libonnxruntime.a into libsherpa-onnx.a (upstream script omits it)
+INSTALL_LIB="$BUILD_DIR/sherpa-onnx/build-swift-macos/install/lib"
+if [ -f "$INSTALL_LIB/libonnxruntime.a" ]; then
+    echo "→ Merging libonnxruntime.a into libsherpa-onnx.a..."
+    libtool -static -o "$INSTALL_LIB/libsherpa-onnx-merged.a" \
+        "$INSTALL_LIB/libsherpa-onnx.a" \
+        "$INSTALL_LIB/libonnxruntime.a"
+    mv "$INSTALL_LIB/libsherpa-onnx-merged.a" "$INSTALL_LIB/libsherpa-onnx.a"
+    echo "→ Merged successfully"
+
+    # Rebuild xcframework with the merged lib
+    echo "→ Rebuilding xcframework..."
+    rm -rf "$BUILD_DIR/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework"
+    xcodebuild -create-xcframework \
+        -library "$INSTALL_LIB/libsherpa-onnx.a" \
+        -headers "$INSTALL_LIB/../install/include" \
+        -output "$BUILD_DIR/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework"
+    echo "→ xcframework rebuilt with onnxruntime"
+fi
+
 # 3. Find and copy the xcframework
 echo "→ Looking for xcframework..."
 XCFW=$(find "$BUILD_DIR" -name "sherpa-onnx.xcframework" -type d | head -1)
@@ -82,6 +102,25 @@ mkdir -p "$FRAMEWORK_DIR"
 rm -rf "$FRAMEWORK_DIR/sherpa-onnx.xcframework"
 cp -R "$XCFW" "$FRAMEWORK_DIR/"
 echo "→ Copied to $FRAMEWORK_DIR/sherpa-onnx.xcframework"
+
+# 3.5 Generate module.modulemap so Swift's canImport(SherpaOnnxLib) works
+HEADERS_DIR=$(find "$FRAMEWORK_DIR/sherpa-onnx.xcframework" -type d -name "Headers" | head -1)
+if [ -n "$HEADERS_DIR" ]; then
+    # Find the C API header relative to Headers dir
+    C_API_HEADER=$(find "$HEADERS_DIR" -name "c-api.h" -type f | head -1)
+    if [ -n "$C_API_HEADER" ]; then
+        REL_HEADER=$(python3 -c "import os; print(os.path.relpath('$C_API_HEADER', '$HEADERS_DIR'))")
+        cat > "$HEADERS_DIR/module.modulemap" <<MODULEMAP
+module SherpaOnnxLib {
+    header "$REL_HEADER"
+    export *
+}
+MODULEMAP
+        echo "→ Generated module.modulemap at $HEADERS_DIR/module.modulemap"
+    else
+        echo "WARNING: c-api.h not found, canImport(SherpaOnnxLib) may not work"
+    fi
+fi
 
 # 4. Copy the Swift API wrapper
 echo "→ Copying Swift API wrapper..."

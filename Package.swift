@@ -14,7 +14,9 @@ var targets: [Target] = [
         path: "Type4Me",
         exclude: ["Resources"],
         cSettings: hasSherpaFramework ? [.headerSearchPath("Bridge")] : [],
-        swiftSettings: [.swiftLanguageMode(.v5)],
+        swiftSettings: [
+            .swiftLanguageMode(.v5),
+        ] + (hasSherpaFramework ? [.define("HAS_SHERPA_ONNX")] : []),
         linkerSettings: hasSherpaFramework ? [
             .linkedLibrary("c++"),
             .linkedFramework("Accelerate"),

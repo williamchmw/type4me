@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-#if canImport(SherpaOnnxLib)
+#if HAS_SHERPA_ONNX
 import SherpaOnnxLib
 
 enum SherpaASRError: Error, LocalizedError {
@@ -324,4 +324,4 @@ actor SherpaASRClient: SpeechRecognizer {
     }
 }
 
-#endif  // canImport(SherpaOnnxLib)
+#endif  // HAS_SHERPA_ONNX

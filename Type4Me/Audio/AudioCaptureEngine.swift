@@ -43,7 +43,7 @@ final class AudioCaptureEngine: NSObject, @unchecked Sendable, AVCaptureAudioDat
 
     // MARK: - VAD
 
-    #if canImport(SherpaOnnxLib)
+    #if HAS_SHERPA_ONNX
     private var sileroVAD: SileroVAD?
     #endif
     private let vadFilter = VADFilter()
@@ -112,7 +112,7 @@ final class AudioCaptureEngine: NSObject, @unchecked Sendable, AVCaptureAudioDat
 
         // Initialize VAD if enabled and SherpaOnnx is available
         vadFilter.reset()
-        #if canImport(SherpaOnnxLib)
+        #if HAS_SHERPA_ONNX
         if vadEnabled && sileroVAD == nil {
             sileroVAD = SileroVAD()
             if sileroVAD != nil {
@@ -244,7 +244,7 @@ final class AudioCaptureEngine: NSObject, @unchecked Sendable, AVCaptureAudioDat
             let chunk = Data(buffer.prefix(Self.chunkByteSize))
             buffer.removeFirst(Self.chunkByteSize)
 
-            #if canImport(SherpaOnnxLib)
+            #if HAS_SHERPA_ONNX
             if vadEnabled, let vad = sileroVAD {
                 if runVAD(on: chunk, vad: vad) {
                     onAudioChunk?(chunk)
@@ -256,7 +256,7 @@ final class AudioCaptureEngine: NSObject, @unchecked Sendable, AVCaptureAudioDat
         }
     }
 
-    #if canImport(SherpaOnnxLib)
+    #if HAS_SHERPA_ONNX
     /// Convert Int16 PCM to Float32, split into 512-sample VAD windows,
     /// and return whether this chunk should be emitted.
     /// Must be called with bufferLock held.

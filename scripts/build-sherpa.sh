@@ -83,7 +83,7 @@ if [ -f "$INSTALL_LIB/libonnxruntime.a" ]; then
     rm -rf "$BUILD_DIR/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework"
     xcodebuild -create-xcframework \
         -library "$INSTALL_LIB/libsherpa-onnx.a" \
-        -headers "$INSTALL_LIB/../install/include" \
+        -headers "$INSTALL_LIB/../include" \
         -output "$BUILD_DIR/sherpa-onnx/build-swift-macos/sherpa-onnx.xcframework"
     echo "→ xcframework rebuilt with onnxruntime"
 fi
@@ -122,10 +122,13 @@ MODULEMAP
     fi
 fi
 
-# 4. Copy the Swift API wrapper
-echo "→ Copying Swift API wrapper..."
+# 4. Copy the Swift API wrapper (only if bridge file doesn't exist yet)
 SWIFT_API="$BUILD_DIR/sherpa-onnx/swift-api-examples/SherpaOnnx.swift"
-if [ -f "$SWIFT_API" ]; then
+if [ -f "$BRIDGE_DIR/SherpaOnnxBridge.swift" ]; then
+    echo "→ SherpaOnnxBridge.swift already exists, skipping (project has customizations)"
+    echo "  Upstream version available at: $SWIFT_API"
+elif [ -f "$SWIFT_API" ]; then
+    echo "→ Copying Swift API wrapper..."
     cp "$SWIFT_API" "$BRIDGE_DIR/SherpaOnnxBridge.swift"
     echo "→ Copied SherpaOnnx.swift → Type4Me/Bridge/SherpaOnnxBridge.swift"
 else

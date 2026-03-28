@@ -5,6 +5,11 @@ struct VolcanoASRConfig: ASRProviderConfig, Sendable {
     static let provider = ASRProvider.volcano
     static var displayName: String { L("火山引擎 (Doubao)", "Volcano (Doubao)") }
 
+    /// Seed ASR 2.0 - same model, 4.5x cheaper, higher default concurrency
+    static let resourceIdSeedASR = "volc.seedasr.sauc.duration"
+    /// Legacy big-model resource ID
+    static let resourceIdBigASR = "volc.bigasr.sauc.duration"
+
     static var credentialFields: [CredentialField] {[
         CredentialField(key: "appKey", label: "App ID", placeholder: "APPID", isSecure: false, isOptional: false, defaultValue: ""),
         CredentialField(key: "accessKey", label: "Access Token", placeholder: L("访问令牌", "Access token"), isSecure: true, isOptional: false, defaultValue: ""),
@@ -23,7 +28,7 @@ struct VolcanoASRConfig: ASRProviderConfig, Sendable {
         self.accessKey = accessKey
         self.resourceId = credentials["resourceId"]?.isEmpty == false
             ? credentials["resourceId"]!
-            : "volc.bigasr.sauc.duration"
+            : Self.resourceIdSeedASR
         self.uid = ASRIdentityStore.loadOrCreateUID()
     }
 

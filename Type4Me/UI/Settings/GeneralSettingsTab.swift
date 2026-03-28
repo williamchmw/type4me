@@ -301,6 +301,8 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
     @State private var isEditingASR = true
     @State private var hasStoredASR = false
     @State private var testTask: Task<Void, Never>?
+    /// Hint shown below ASR credentials when only bigasr works (not seed 2.0)
+    @State private var volcResourceHint: String?
 
     // Local model states
     @State private var selectedStreamingModel: ModelManager.StreamingModel = ModelManager.selectedStreamingModel
@@ -420,6 +422,13 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
                     }
                 }
                 .padding(.top, 12)
+
+                if let hint = volcResourceHint {
+                    Text(hint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(TF.settingsAccentAmber)
+                        .padding(.top, 4)
+                }
             }
         }
         .task {
@@ -807,9 +816,15 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
     private func testASRConnection() {
         testTask?.cancel()
         asrTestStatus = .testing
+        volcResourceHint = nil
         let testValues = effectiveASRValues
         let provider = selectedASRProvider
         testTask = Task {
+            // Volcengine: auto-detect best resource ID (seed 2.0 vs bigasr)
+            if provider == .volcano {
+                await testVolcanoWithAutoResource(baseValues: testValues)
+                return
+            }
             do {
                 guard let configType = ASRProviderRegistry.configType(for: provider),
                       let config = configType.init(credentials: testValues),
@@ -828,6 +843,71 @@ struct ASRSettingsCard: View, SettingsCardHelpers {
                 asrTestStatus = .failed(Self.describeConnectionError(error))
             }
         }
+    }
+
+    /// Test both Volcengine resource IDs and pick the best one.
+    private func testVolcanoWithAutoResource(baseValues: [String: String]) async {
+        let options = currentASRRequestOptions(enablePunc: false)
+        let seedId = VolcanoASRConfig.resourceIdSeedASR
+        let bigId = VolcanoASRConfig.resourceIdBigASR
+
+        // Test Seed ASR 2.0 first (cheaper)
+        let seedOK = await testVolcResource(baseValues: baseValues, resourceId: seedId, options: options)
+        guard !Task.isCancelled else { return }
+
+        if seedOK {
+            // Seed 2.0 works, use it
+            var values = baseValues
+            values["resourceId"] = seedId
+            saveASRCredentialsQuietly(values)
+            asrTestStatus = .success
+            return
+        }
+
+        // Seed 2.0 failed, try bigasr
+        let bigOK = await testVolcResource(baseValues: baseValues, resourceId: bigId, options: options)
+        guard !Task.isCancelled else { return }
+
+        if bigOK {
+            var values = baseValues
+            values["resourceId"] = bigId
+            saveASRCredentialsQuietly(values)
+            asrTestStatus = .success
+            volcResourceHint = L(
+                "当前使用大模型版本，开通「模型 2.0」可节省约 80% 费用，识别效果相同",
+                "Using bigmodel tier. Enable \"Model 2.0\" for ~80% cost savings with identical quality"
+            )
+            return
+        }
+
+        // Both failed, show the seed error (more common)
+        asrTestStatus = .failed(L("连接失败，请检查 App ID 和 Access Token", "Connection failed, check App ID & Access Token"))
+    }
+
+    private func testVolcResource(baseValues: [String: String], resourceId: String, options: ASRRequestOptions) async -> Bool {
+        var values = baseValues
+        values["resourceId"] = resourceId
+        guard let config = VolcanoASRConfig(credentials: values) else { return false }
+        let client = VolcASRClient()
+        do {
+            try await client.connect(config: config, options: options)
+            await client.disconnect()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func saveASRCredentialsQuietly(_ values: [String: String]) {
+        do {
+            try KeychainService.saveASRCredentials(for: .volcano, values: values)
+            KeychainService.selectedASRProvider = .volcano
+            asrCredentialValues = values
+            savedASRValues = values
+            editedFields = []
+            hasStoredASR = true
+            isEditingASR = false
+        } catch {}
     }
 
     private static func describeConnectionError(_ error: Error) -> String {

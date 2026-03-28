@@ -162,7 +162,7 @@ actor RecognitionSession {
                   let appKey = ProcessInfo.processInfo.environment["VOLC_APP_KEY"],
                   let accessKey = ProcessInfo.processInfo.environment["VOLC_ACCESS_KEY"] {
             // Env var fallback (volcano only, for dev convenience)
-            let resourceId = ProcessInfo.processInfo.environment["VOLC_RESOURCE_ID"] ?? "volc.bigasr.sauc.duration"
+            let resourceId = ProcessInfo.processInfo.environment["VOLC_RESOURCE_ID"] ?? VolcanoASRConfig.resourceIdSeedASR
             let volcConfig = VolcanoASRConfig(credentials: [
                 "appKey": appKey, "accessKey": accessKey, "resourceId": resourceId,
             ])!

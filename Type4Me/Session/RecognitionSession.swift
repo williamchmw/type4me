@@ -523,8 +523,11 @@ actor RecognitionSession {
             }
 
             state = .injecting
-            let preserveClipboard = UserDefaults.standard.bool(forKey: "tf_preserveClipboard")
-            injectionEngine.method = preserveClipboard ? .keyboard : .clipboard
+            // Always use clipboard injection (Cmd+V). When preserveClipboard is on,
+            // injectViaClipboard already saves and restores the clipboard contents.
+            // Keyboard injection (CGEvent Unicode) has compatibility issues with
+            // cursor positioning in many apps, so we no longer use it.
+            injectionEngine.method = .clipboard
 
             let injectionOutcome: InjectionOutcome
             if injectionAborted {
@@ -533,7 +536,7 @@ actor RecognitionSession {
                 DebugFileLogger.log("stop: injection aborted by ESC, text saved to clipboard & history")
                 injectionOutcome = .copiedToClipboard
             } else {
-                DebugFileLogger.log("stop: injecting method=\(preserveClipboard ? "keyboard" : "clipboard") +\(ContinuousClock.now - stopT0)")
+                DebugFileLogger.log("stop: injecting method=clipboard text=[\(finalText.prefix(50))] len=\(finalText.count) +\(ContinuousClock.now - stopT0)")
                 injectionOutcome = injectionEngine.inject(finalText)
             }
             onASREvent?(.finalized(text: finalText, injection: injectionOutcome))

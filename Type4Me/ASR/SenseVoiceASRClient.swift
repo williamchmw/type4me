@@ -45,6 +45,13 @@ actor SenseVoiceASRClient: SpeechRecognizer {
     /// Samples between partial recognition runs (~200ms at 16kHz).
     private let partialRecognitionInterval = 3200
 
+    /// Whether a partial recognition is currently running in the background.
+    private var partialRecognitionInFlight = false
+    /// Set to true in endAudio() to reject late-arriving partial results.
+    private var finalized = false
+    /// Number of confirmed segment decodes currently in flight.
+    private var pendingConfirmations = 0
+
     var events: AsyncStream<RecognitionEvent> {
         if let existing = _events {
             return existing
@@ -135,6 +142,9 @@ actor SenseVoiceASRClient: SpeechRecognizer {
         samplesSkipped = 0
         speechBuffer = []
         samplesSinceLastPartial = 0
+        partialRecognitionInFlight = false
+        finalized = false
+        pendingConfirmations = 0
 
         let svModelDir = sherpaConfig.senseVoiceModelDir
         let vadModelDir = sherpaConfig.vadModelDir
@@ -268,7 +278,7 @@ actor SenseVoiceASRClient: SpeechRecognizer {
                 samplesSinceLastPartial += 512
             }
 
-            // Process completed speech segments from VAD
+            // Process completed speech segments from VAD (async to avoid blocking audio pipeline)
             while !vad.isEmpty() {
                 let segment = vad.front()
                 vad.pop()
@@ -276,35 +286,36 @@ actor SenseVoiceASRClient: SpeechRecognizer {
                 let samples = segment.samples
                 guard !samples.isEmpty else { continue }
 
-                let result = recognizer.decode(samples: samples, sampleRate: 16_000)
-                let segmentText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                if !segmentText.isEmpty {
-                    let punctuated = punctProcessor?.addPunctuation(to: segmentText) ?? segmentText
-                    confirmedSegments.append(punctuated)
-                    logger.info("VAD segment confirmed: \(punctuated)")
-                }
-
                 // Clear speech buffer since this segment is finalized
                 speechBuffer = []
                 samplesSinceLastPartial = 0
                 currentPartialText = ""
 
-                emitTranscript(isFinal: false)
+                pendingConfirmations += 1
+                let rec = recognizer
+                let punct = punctProcessor
+                Task { [weak self] in
+                    let result = rec.decode(samples: samples, sampleRate: 16_000)
+                    let segmentText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    await self?.confirmSegment(segmentText, punctProcessor: punct)
+                }
             }
 
-            // Run partial recognition on accumulated buffer periodically
-            if vad.isSpeechDetected() && samplesSinceLastPartial >= partialRecognitionInterval {
+            // Schedule partial recognition on accumulated buffer periodically.
+            // Runs in a detached task so it doesn't block the audio pipeline.
+            if vad.isSpeechDetected()
+                && samplesSinceLastPartial >= partialRecognitionInterval
+                && !partialRecognitionInFlight
+                && !speechBuffer.isEmpty
+            {
                 samplesSinceLastPartial = 0
-
-                guard !speechBuffer.isEmpty else { continue }
-
-                let result = recognizer.decode(samples: speechBuffer, sampleRate: 16_000)
-                let partialText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                if partialText != currentPartialText {
-                    currentPartialText = partialText
-                    emitTranscript(isFinal: false)
+                partialRecognitionInFlight = true
+                let bufferSnapshot = speechBuffer
+                let rec = recognizer
+                Task { [weak self] in
+                    let result = rec.decode(samples: bufferSnapshot, sampleRate: 16_000)
+                    let partialText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    await self?.updatePartial(partialText)
                 }
             }
         }
@@ -320,15 +331,28 @@ actor SenseVoiceASRClient: SpeechRecognizer {
     // MARK: - End Audio
 
     func endAudio() async throws {
-        guard let vad, let recognizer else { return }
+        guard let vad, let recognizer else {
+            DebugFileLogger.log("SenseVoice endAudio: guard failed, vad=\(vad != nil) recognizer=\(recognizer != nil)")
+            return
+        }
 
+        DebugFileLogger.log("SenseVoice endAudio: start, confirmed=\(confirmedSegments.count) buffer=\(speechBuffer.count) pending=\(pendingConfirmations)")
+
+        // Wait for any in-flight segment confirmations to land
+        while pendingConfirmations > 0 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        finalized = true  // reject any late-arriving partial results
         // Flush VAD to get any remaining speech
         vad.flush()
 
-        // Process any remaining segments
+        // Process any remaining segments from VAD flush
+        var flushedSegments = false
         while !vad.isEmpty() {
             let segment = vad.front()
             vad.pop()
+            flushedSegments = true
 
             let samples = segment.samples
             guard !samples.isEmpty else { continue }
@@ -343,8 +367,10 @@ actor SenseVoiceASRClient: SpeechRecognizer {
             }
         }
 
-        // If there's still audio in the speech buffer that VAD didn't pop, recognize it
-        if !speechBuffer.isEmpty {
+        // Only use speechBuffer as fallback if VAD flush produced nothing.
+        // When VAD flushed segments, those segments already contain the speech
+        // audio, so decoding speechBuffer again would produce duplicate text.
+        if !flushedSegments && !speechBuffer.isEmpty {
             let result = recognizer.decode(samples: speechBuffer, sampleRate: 16_000)
             let remainingText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -353,8 +379,8 @@ actor SenseVoiceASRClient: SpeechRecognizer {
                 confirmedSegments.append(punctuated)
                 logger.info("Remaining buffer confirmed: \(punctuated)")
             }
-            speechBuffer = []
         }
+        speechBuffer = []
 
         currentPartialText = ""
 
@@ -379,6 +405,29 @@ actor SenseVoiceASRClient: SpeechRecognizer {
         logger.info("SenseVoiceASR disconnected")
     }
 
+    // MARK: - Async recognition callbacks
+
+    private func confirmSegment(_ text: String, punctProcessor: SherpaPunctuationProcessor?) {
+        pendingConfirmations = max(0, pendingConfirmations - 1)
+        guard !finalized else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let punctuated = punctProcessor?.addPunctuation(to: trimmed) ?? trimmed
+        confirmedSegments.append(punctuated)
+        currentPartialText = ""
+        logger.info("VAD segment confirmed: \(punctuated)")
+        emitTranscript(isFinal: false)
+    }
+
+    private func updatePartial(_ text: String) {
+        partialRecognitionInFlight = false
+        guard !finalized else { return }  // endAudio already fired, ignore stale partial
+        if text != currentPartialText {
+            currentPartialText = text
+            emitTranscript(isFinal: false)
+        }
+    }
+
     // MARK: - Internal
 
     private func emitTranscript(isFinal: Bool) {
@@ -390,6 +439,7 @@ actor SenseVoiceASRClient: SpeechRecognizer {
             authoritativeText: isFinal ? composedText : "",
             isFinal: isFinal
         )
+        DebugFileLogger.log("SenseVoice emit: confirmed=\(confirmedSegments.count) partial=\(currentPartialText.count) composed=\(composedText.count) isFinal=\(isFinal)")
         eventContinuation?.yield(.transcript(transcript))
     }
 }

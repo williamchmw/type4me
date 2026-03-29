@@ -45,6 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("[Type4Me] applicationDidFinishLaunching")
+        // Show in Dock on launch; hides when all windows are closed.
+        NSApp.setActivationPolicy(.regular)
         KeychainService.migrateIfNeeded()
         HotwordStorage.seedIfNeeded()
 

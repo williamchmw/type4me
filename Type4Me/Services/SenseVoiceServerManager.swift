@@ -16,15 +16,23 @@ actor SenseVoiceServerManager {
         #endif
     }()
 
-    /// Port of the running server, accessible synchronously from any isolation context.
+    /// Port of the running SenseVoice server (primary, streaming).
     /// Set by actor-isolated `start()`, read by sync callers like KeychainService.
     nonisolated(unsafe) private(set) static var currentPort: Int?
+
+    /// Port of the running Qwen3-ASR server (secondary, speculative final).
+    /// Only set on Apple Silicon where both servers run.
+    nonisolated(unsafe) private(set) static var currentQwen3Port: Int?
 
     private let logger = Logger(subsystem: "com.type4me.sensevoice", category: "ServerManager")
 
     private var process: Process?
     private(set) var port: Int?
     private var stdoutPipe: Pipe?
+
+    private var qwen3Process: Process?
+    private(set) var qwen3Port: Int?
+    private var qwen3StdoutPipe: Pipe?
 
     var isRunning: Bool { process?.isRunning ?? false }
 
@@ -38,33 +46,52 @@ actor SenseVoiceServerManager {
         return URL(string: "http://127.0.0.1:\(port)/health")
     }
 
-    /// Start the local ASR server (Qwen3-ASR on ARM64, SenseVoice on x86_64).
+    var qwen3WSURL: URL? {
+        guard let qwen3Port else { return nil }
+        return URL(string: "ws://127.0.0.1:\(qwen3Port)/ws")
+    }
+
+    /// Start the local ASR server(s).
+    /// Apple Silicon: SenseVoice (streaming) + Qwen3-ASR (speculative final).
+    /// Intel: SenseVoice only (handles both streaming + final).
     func start() async throws {
         guard !isRunning else {
             logger.info("Server already running on port \(self.port ?? 0)")
             return
         }
 
+        // SenseVoice is always the primary server (streaming partials + fallback final)
+        try await launchSenseVoiceServer()
+
+        // On Apple Silicon, also start Qwen3-ASR for accurate speculative transcription
+        if Self.isAppleSilicon {
+            do {
+                try await launchQwen3Server()
+            } catch {
+                // Graceful degradation: Qwen3 failure is not fatal, SenseVoice handles everything
+                logger.warning("Qwen3-ASR server failed to start, falling back to SenseVoice-only: \(error)")
+                DebugFileLogger.log("Qwen3-ASR launch failed: \(error). SenseVoice-only mode.")
+            }
+        }
+    }
+
+    /// Launch the SenseVoice server as the primary streaming server.
+    private func launchSenseVoiceServer() async throws {
         let proc = Process()
         var args: [String] = []
 
-        if Self.isAppleSilicon {
-            try configureQwen3Server(proc: proc, args: &args)
-        } else {
-            try configureSenseVoiceServer(proc: proc, args: &args)
-        }
+        try configureSenseVoiceServer(proc: proc, args: &args)
 
-        // LLM model (optional, for local chat completions endpoint)
-        if let llmPath = LocalQwenLLMConfig.modelPath {
+        // On Intel (no Qwen3), LLM runs on SenseVoice server
+        if !Self.isAppleSilicon, let llmPath = LocalQwenLLMConfig.modelPath {
             args += ["--llm-model", llmPath]
-            logger.info("LLM model found at \(llmPath)")
+            logger.info("LLM model configured on SenseVoice server: \(llmPath)")
         }
 
         proc.arguments = args
 
         let pipe = Pipe()
         proc.standardOutput = pipe
-        // Log stderr to debug file instead of discarding
         let errPipe = Pipe()
         proc.standardError = errPipe
         errPipe.fileHandleForReading.readabilityHandler = { handle in
@@ -76,18 +103,16 @@ actor SenseVoiceServerManager {
         }
         self.stdoutPipe = pipe
 
-        let serverType = Self.isAppleSilicon ? "Qwen3-ASR" : "SenseVoice"
-        logger.info("Starting \(serverType) server: \(proc.executableURL?.path ?? "?")")
+        logger.info("Starting SenseVoice server: \(proc.executableURL?.path ?? "?")")
 
         do {
             try proc.run()
         } catch {
-            logger.error("Failed to start server: \(error)")
+            logger.error("Failed to start SenseVoice server: \(error)")
             throw ServerError.launchFailed(error)
         }
         self.process = proc
 
-        // Read PORT:xxxxx from stdout (with timeout)
         let portResult = await readPortFromStdout(pipe: pipe, timeout: 60)
         guard let discoveredPort = portResult else {
             proc.terminate()
@@ -98,24 +123,94 @@ actor SenseVoiceServerManager {
         Self.currentPort = discoveredPort
         logger.info("SenseVoice server started on port \(discoveredPort)")
 
-        // Wait for health check
         let healthy = await waitForHealth(timeout: 30)
         if !healthy {
-            logger.warning("Server started but health check not responding yet")
+            logger.warning("SenseVoice server started but health check not responding yet")
         }
     }
 
-    /// Stop the server process.
+    /// Launch the Qwen3-ASR server as secondary (speculative final + LLM).
+    private func launchQwen3Server() async throws {
+        let proc = Process()
+        var args: [String] = []
+
+        try configureQwen3Server(proc: proc, args: &args)
+
+        // LLM runs on Qwen3 server (shares _inference_lock for Metal GPU)
+        if let llmPath = LocalQwenLLMConfig.modelPath {
+            args += ["--llm-model", llmPath]
+            logger.info("LLM model configured on Qwen3 server: \(llmPath)")
+        }
+
+        proc.arguments = args
+
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        let errPipe = Pipe()
+        proc.standardError = errPipe
+        errPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let msg = String(data: data, encoding: .utf8) else { return }
+            for line in msg.split(separator: "\n") where !line.isEmpty {
+                DebugFileLogger.log("qwen3-asr-server: \(line)")
+            }
+        }
+        self.qwen3StdoutPipe = pipe
+
+        logger.info("Starting Qwen3-ASR server: \(proc.executableURL?.path ?? "?")")
+
+        do {
+            try proc.run()
+        } catch {
+            logger.error("Failed to start Qwen3-ASR server: \(error)")
+            throw ServerError.launchFailed(error)
+        }
+        self.qwen3Process = proc
+
+        let portResult = await readPortFromStdout(pipe: pipe, timeout: 120)
+        guard let discoveredPort = portResult else {
+            proc.terminate()
+            self.qwen3Process = nil
+            throw ServerError.portDiscoveryFailed
+        }
+        self.qwen3Port = discoveredPort
+        Self.currentQwen3Port = discoveredPort
+        logger.info("Qwen3-ASR server started on port \(discoveredPort)")
+
+        // Health check for Qwen3
+        let qwen3HealthURL = URL(string: "http://127.0.0.1:\(discoveredPort)/health")!
+        var healthy = false
+        for _ in 0..<30 {
+            do {
+                let (_, response) = try await URLSession.shared.data(from: qwen3HealthURL)
+                if (response as? HTTPURLResponse)?.statusCode == 200 { healthy = true; break }
+            } catch {}
+            try? await Task.sleep(for: .seconds(1))
+        }
+        if !healthy {
+            logger.warning("Qwen3-ASR server started but health check not responding yet")
+        }
+    }
+
+    /// Stop all server processes.
     func stop() {
-        guard let proc = process else { return }
-        if proc.isRunning {
+        if let proc = process, proc.isRunning {
             proc.terminate()
         }
         process = nil
         port = nil
         Self.currentPort = nil
         stdoutPipe = nil
-        logger.info("SenseVoice server stopped")
+
+        if let proc = qwen3Process, proc.isRunning {
+            proc.terminate()
+        }
+        qwen3Process = nil
+        qwen3Port = nil
+        Self.currentQwen3Port = nil
+        qwen3StdoutPipe = nil
+
+        logger.info("All ASR servers stopped")
     }
 
     /// Check if the server is healthy.

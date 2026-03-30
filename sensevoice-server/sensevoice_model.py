@@ -1034,7 +1034,7 @@ class StreamingSenseVoice:
         )
         self.query = torch.cat((language, event_emo, textnorm), dim=1)
         # features
-        cmvn = load_cmvn(kwargs["frontend_conf"]["cmvn_file"]).numpy()
+        cmvn = load_cmvn(kwargs["frontend_conf"]["cmvn_file"]).detach().numpy()
         self.neg_mean, self.inv_stddev = cmvn[0, :], cmvn[1, :]
         self.fbank = OnlineFbank(window_type="hamming")
         # decoder
@@ -1123,7 +1123,7 @@ class StreamingSenseVoice:
             speech_lengths += 4
             with torch.no_grad():
                 encoder_out, _ = self.model.encoder(speech, speech_lengths)
-            logits = self.model.ctc.log_softmax(encoder_out)[0, 4:].numpy()
+            logits = self.model.ctc.log_softmax(encoder_out)[0, 4:].detach().numpy()
 
         # Greedy decode on full sequence
         token_ids = logits.argmax(axis=-1).tolist()
@@ -1166,7 +1166,7 @@ class StreamingSenseVoice:
         speech = torch.cat((self.query, speech), dim=1)
         speech_lengths += 4
         encoder_out, _ = self.model.encoder(speech, speech_lengths)
-        return self.model.ctc.log_softmax(encoder_out)[0, 4:]
+        return self.model.ctc.log_softmax(encoder_out)[0, 4:].detach()
 
     def decode(self, times, tokens):
         times_ms = []

@@ -434,7 +434,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static var openSettingsAction: (() -> Void)?
 
     func applicationWillTerminate(_ notification: Notification) {
-        Task { await SenseVoiceServerManager.shared.stop() }
+        // Synchronous cleanup: async Task may not complete before process exits.
+        SenseVoiceServerManager.killOrphanProcesses()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

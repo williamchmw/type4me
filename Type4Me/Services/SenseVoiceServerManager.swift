@@ -32,6 +32,11 @@ actor SenseVoiceServerManager {
             return
         }
 
+        // Kill orphan sensevoice-server processes from previous app sessions.
+        // Without this, stale processes hold the ModelScope lock and consume
+        // resources, preventing the new server from starting.
+        Self.killOrphanProcesses()
+
         // For development: use venv Python + server.py
         // For production: use PyInstaller binary at Bundle.main.executableURL/../sensevoice-server
         let serverScript: String
@@ -60,7 +65,7 @@ actor SenseVoiceServerManager {
             }
         }
 
-        // Model directory: prefer bundled model, fallback to ModelScope ID for auto-download
+        // Model directory: prefer bundled model, then ModelScope cache, fallback to ModelScope ID
         let bundledModel = Bundle.main.resourceURL?
             .appendingPathComponent("Models")
             .appendingPathComponent("SenseVoiceSmall")
@@ -69,9 +74,18 @@ actor SenseVoiceServerManager {
             modelDir = bundled.path
             logger.info("Using bundled model at \(bundled.path)")
         } else {
-            // FunASR will download from ModelScope (~900MB) and cache in ~/.cache/modelscope/
-            modelDir = "iic/SenseVoiceSmall"
-            logger.info("No bundled model, will download from ModelScope")
+            // Check ModelScope cache: if model.pt exists, use the local path directly
+            // to avoid ModelScope re-downloading due to stale metadata.
+            let cacheDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".cache/modelscope/hub/models/iic/SenseVoiceSmall")
+            let cachedModel = cacheDir.appendingPathComponent("model.pt")
+            if FileManager.default.fileExists(atPath: cachedModel.path) {
+                modelDir = cacheDir.path
+                logger.info("Using ModelScope cached model at \(cacheDir.path)")
+            } else {
+                modelDir = "iic/SenseVoiceSmall"
+                logger.info("No cached model, will download from ModelScope")
+            }
         }
 
         // Hotwords file (optional, may not exist)
@@ -159,11 +173,35 @@ actor SenseVoiceServerManager {
         guard let proc = process else { return }
         if proc.isRunning {
             proc.terminate()
+            proc.waitUntilExit()
         }
         process = nil
         port = nil
         stdoutPipe = nil
         logger.info("SenseVoice server stopped")
+    }
+
+    /// Kill any sensevoice-server processes not owned by this manager instance.
+    /// Called at start() to clean up orphans from previous app launches.
+    nonisolated static func killOrphanProcesses() {
+        let pipe = Pipe()
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        task.arguments = ["-f", "sensevoice-server"]
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        try? task.run()
+        task.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
+        let pids = output.split(separator: "\n").compactMap { Int32($0) }
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        for pid in pids where pid != myPID {
+            kill(pid, SIGTERM)
+        }
+        if !pids.isEmpty {
+            NSLog("[SenseVoice] Killed %d orphan sensevoice-server processes", pids.count)
+        }
     }
 
     /// Check if the server is healthy.

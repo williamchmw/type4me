@@ -52,9 +52,11 @@ pyinstaller \
     --hidden-import=uvicorn.protocols.websockets.auto \
     --hidden-import=uvicorn.lifespan \
     --hidden-import=uvicorn.lifespan.on \
+    --hidden-import=email_validator \
     --collect-all funasr \
     --collect-all asr_decoder \
     --collect-all online_fbank \
+    --collect-all email_validator \
     --noconfirm \
     server.py
 

@@ -18,10 +18,10 @@
 
 两个版本，共享配置文件，可随时替换安装：  
 
-| 版本                                                         | 说明                                                         | 大小   |
+| 版本                                                         | 说明                                                         | 安装包大小   |
 | ------------------------------------------------------------ | ------------------------------------------------------------ | ------ |
-| ✨推荐：**[Type4Me-v1.6.2-cloud.dmg](https://github.com/joewongjc/type4me/releases/download/v1.6.2/Type4Me-v1.6.2-cloud.dmg)** | 支持云端识别，需配置语音、大模型API Key。语音识别推荐火山引擎、体验最好。送的额度可以用很久，后续使用也十分便宜。[配置指引](https://my.feishu.cn/wiki/QdEnwBMfUi0mN4k3ucMcNYhUnXr) | ~23MB  |
-| **[Type4Me-v1.6.2-local.dmg](https://github.com/joewongjc/type4me/releases/download/v1.6.2/Type4Me-v1.6.2-local.dmg)** | 内嵌本地语音识别引擎（约占用8GB内存，建议电脑内存32GB以上再用），大模型依旧需要配置API Key或Ollama本地服务。 | ~1.2GB |
+| ✨推荐：**[云端版本（点击下载）](https://github.com/joewongjc/type4me/releases/download/v1.6.2/Type4Me-v1.6.2-cloud.dmg)** | 支持云端识别，需配置语音、大模型API Key。语音识别推荐火山引擎、体验最好。送的额度可以用很久，后续使用也十分便宜。[配置指引](https://my.feishu.cn/wiki/QdEnwBMfUi0mN4k3ucMcNYhUnXr) | ~23MB  |
+| **[本地版本（点击下载）](https://github.com/joewongjc/type4me/releases/download/v1.6.2/Type4Me-v1.6.2-local.dmg)** | 内嵌本地语音识别引擎（普通电脑配置慎用。约占用8GB内存，建议电脑内存32GB以上再用），大模型依旧需要配置API Key或Ollama本地服务。 | ~1.2GB |
 
 系统要求：macOS 14+ (Sonoma)
 

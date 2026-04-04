@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && /bin/pwd -P)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && /bin/pwd -P)"
 APP_NAME="Type4Me"
-APP_VERSION="${APP_VERSION:-1.6.3}"
+APP_VERSION="${APP_VERSION:-1.7.0}"
 VARIANT="${VARIANT:-cloud}"    # cloud or local
 ARCH="${ARCH:-}"               # arm64 or universal (default: universal for cloud, arm64 for local)
 DIST_DIR="${DIST_DIR:-$PROJECT_DIR/dist}"

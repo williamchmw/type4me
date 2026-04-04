@@ -12,6 +12,7 @@ struct HistoryRecord: Identifiable, Hashable {
     let finalText: String
     let status: String
     let characterCount: Int?
+    let asrProvider: String?
 }
 
 // MARK: - View
@@ -383,6 +384,9 @@ struct HistoryTab: View {
                 if let mode = record.processingMode {
                     Label(mode, systemImage: "text.bubble")
                 }
+                if let provider = record.asrProvider {
+                    Label(provider, systemImage: "mic")
+                }
                 Spacer()
             }
             .font(.system(size: 10))
@@ -426,6 +430,7 @@ struct HistoryTab: View {
                     )
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(copiedId == record.id ? TF.settingsAccentGreen : TF.settingsTextSecondary)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -438,6 +443,7 @@ struct HistoryTab: View {
                     Label(L("删除", "Delete"), systemImage: "trash")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(TF.settingsAccentRed.opacity(0.7))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }

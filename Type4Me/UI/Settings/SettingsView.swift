@@ -12,6 +12,10 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static var visibleTabs: [SettingsTab] {
+        allCases
+    }
+
     var displayName: String {
         switch self {
         case .general:     return L("通用", "General")
@@ -81,7 +85,7 @@ struct SettingsView: View {
 
             // Nav items
             VStack(spacing: 2) {
-                ForEach(SettingsTab.allCases) { tab in
+                ForEach(SettingsTab.visibleTabs) { tab in
                     navItem(tab)
                 }
             }

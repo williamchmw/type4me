@@ -13,6 +13,7 @@ enum ASRProvider: String, CaseIterable, Codable, Sendable {
     case aws
     case deepgram
     case assemblyai
+    case elevenlabs
     case soniox
     // China
     case volcano
@@ -21,8 +22,6 @@ enum ASRProvider: String, CaseIterable, Codable, Sendable {
     case tencent
     case baidu
     case iflytek
-    // Cloud
-    case cloud
     // Fallback
     case custom
 
@@ -36,6 +35,7 @@ enum ASRProvider: String, CaseIterable, Codable, Sendable {
         case .aws:      return "AWS Transcribe"
         case .deepgram: return "Deepgram"
         case .assemblyai: return "AssemblyAI"
+        case .elevenlabs: return "ElevenLabs"
         case .soniox:   return "Soniox"
         case .volcano:  return L("火山引擎 (Doubao)", "Volcano (Doubao)")
         case .aliyun:   return L("阿里云", "Alibaba Cloud")
@@ -43,7 +43,6 @@ enum ASRProvider: String, CaseIterable, Codable, Sendable {
         case .tencent:  return L("腾讯云", "Tencent Cloud")
         case .baidu:    return L("百度智能云", "Baidu AI Cloud")
         case .iflytek:  return L("讯飞", "iFLYTEK")
-        case .cloud:    return "Type4Me Cloud"
         case .custom:   return L("自定义", "Custom")
         }
     }

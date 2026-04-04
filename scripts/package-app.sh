@@ -7,7 +7,7 @@ APP_NAME="Type4Me"
 APP_EXECUTABLE="Type4Me"
 APP_ICON_NAME="AppIcon"
 APP_BUNDLE_ID="${APP_BUNDLE_ID:-com.type4me.app}"
-APP_VERSION="${APP_VERSION:-1.6.3}"
+APP_VERSION="${APP_VERSION:-1.7.0}"
 APP_BUILD="${APP_BUILD:-1}"
 MIN_SYSTEM_VERSION="${MIN_SYSTEM_VERSION:-14.0}"
 VARIANT="${VARIANT:-cloud}"    # cloud or local
@@ -232,22 +232,35 @@ fi
 # Copy third-party licenses
 cp "$PROJECT_DIR/Type4Me/Resources/THIRD_PARTY_LICENSES.txt" "$APP_PATH/Contents/Resources/" 2>/dev/null || true
 
-echo "Signing with '${SIGNING_IDENTITY}'..."
-# PyInstaller dist dirs contain .dylibs and dist-info dirs that confuse
-# codesign's bundle detection. Move server files out temporarily.
-SERVER_TEMP=""
-Q3_DIST="$APP_PATH/Contents/MacOS/qwen3-asr-server-dist"
-Q3_WRAPPER="$APP_PATH/Contents/MacOS/qwen3-asr-server"
-if [ -d "$Q3_DIST" ] || [ -f "$Q3_WRAPPER" ]; then
-    SERVER_TEMP="$(mktemp -d)"
-    [ -d "$Q3_DIST" ] && mv "$Q3_DIST" "$SERVER_TEMP/qwen3-asr-server-dist"
-    [ -f "$Q3_WRAPPER" ] && mv "$Q3_WRAPPER" "$SERVER_TEMP/qwen3-asr-server"
+# Sign the app bundle. Skip if already signed with the same identity to preserve
+# Keychain ACLs and Accessibility TCC records across rebuilds.
+NEEDS_SIGN=1
+if codesign -dvv "$APP_PATH" 2>&1 | grep -q "Authority=${SIGNING_IDENTITY}"; then
+    # Same identity, but binary may have changed. Check if signature is still valid.
+    if codesign --verify --strict "$APP_PATH" 2>/dev/null; then
+        echo "Signature valid with '${SIGNING_IDENTITY}', skipping re-sign."
+        NEEDS_SIGN=0
+    fi
 fi
-codesign -f -s "$SIGNING_IDENTITY" "$APP_PATH" 2>/dev/null && echo "Signed." || echo "Signing skipped (no identity available)."
-if [ -n "$SERVER_TEMP" ]; then
-    [ -d "$SERVER_TEMP/qwen3-asr-server-dist" ] && mv "$SERVER_TEMP/qwen3-asr-server-dist" "$Q3_DIST"
-    [ -f "$SERVER_TEMP/qwen3-asr-server" ] && mv "$SERVER_TEMP/qwen3-asr-server" "$Q3_WRAPPER"
-    rm -rf "$SERVER_TEMP"
+
+if [ "$NEEDS_SIGN" = "1" ]; then
+    echo "Signing with '${SIGNING_IDENTITY}'..."
+    # PyInstaller dist dirs contain .dylibs and dist-info dirs that confuse
+    # codesign's bundle detection. Move server files out temporarily.
+    SERVER_TEMP=""
+    Q3_DIST="$APP_PATH/Contents/MacOS/qwen3-asr-server-dist"
+    Q3_WRAPPER="$APP_PATH/Contents/MacOS/qwen3-asr-server"
+    if [ -d "$Q3_DIST" ] || [ -f "$Q3_WRAPPER" ]; then
+        SERVER_TEMP="$(mktemp -d)"
+        [ -d "$Q3_DIST" ] && mv "$Q3_DIST" "$SERVER_TEMP/qwen3-asr-server-dist"
+        [ -f "$Q3_WRAPPER" ] && mv "$Q3_WRAPPER" "$SERVER_TEMP/qwen3-asr-server"
+    fi
+    codesign -f -s "$SIGNING_IDENTITY" "$APP_PATH" 2>/dev/null && echo "Signed." || echo "Signing skipped (no identity available)."
+    if [ -n "$SERVER_TEMP" ]; then
+        [ -d "$SERVER_TEMP/qwen3-asr-server-dist" ] && mv "$SERVER_TEMP/qwen3-asr-server-dist" "$Q3_DIST"
+        [ -f "$SERVER_TEMP/qwen3-asr-server" ] && mv "$SERVER_TEMP/qwen3-asr-server" "$Q3_WRAPPER"
+        rm -rf "$SERVER_TEMP"
+    fi
 fi
 
 echo "Variant: $VARIANT | Arch: $ARCH"

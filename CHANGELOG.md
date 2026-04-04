@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.7.0 — 社区 PR 合并 + Keychain 迁移 + 注入性能优化 (2026-04-04)
+
+### 社区贡献
+- 历史记录显示 ASR 引擎名称 (#99, @jovezhong)
+- Deepgram 数字转换开关 (#100, @jovezhong)
+- ElevenLabs Scribe v2 流式识别引擎 (#101, @jovezhong)
+- API Key 迁移到 macOS Keychain + 日志脱敏 (#102, @jasonwong2001)
+- 空录音不保存历史 + 按钮点击区域优化 (#103, @ShaneLevs)
+
+### 词汇管理
+- 内置热词/片段脱钩，改为纯用户管理
+- 热词和片段替换支持批量编辑（Sheet 弹窗，每行一条）
+- 批量编辑按钮移到标题行，与排序按钮并排
+- Soniox 二次校准死代码清理
+
+### 性能优化
+- 文本注入后立即通知 UI，剪贴板恢复延迟执行，减少粘贴→完成的感知延迟
+- 快捷键停止和 ESC 中断改用 MainActor.assumeIsolated，减少调度延迟
+- 防止旧 session 的 stale finalized 覆盖新录音
+
+### 构建
+- DMG 构建自动检测 variant/sherpa 状态变化，清理过期缓存
+- 签名跳过优化：同 identity + 有效签名时不重签
+
 ## v1.6.2 — Soniox 重构 + 异步校准 + 并发安全 (2026-04-01)
 
 - Soniox 客户端重构：去掉 ConnectionGate/Delegate，简化为直连 WebSocket

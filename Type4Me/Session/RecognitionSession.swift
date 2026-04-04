@@ -49,12 +49,8 @@ actor RecognitionSession {
         category: "RecognitionSession"
     )
 
-    /// Whether the active session is using the Cloud provider (ASR + LLM proxied).
-    private var isCloudMode: Bool { activeProvider == .cloud }
-
     /// Return the appropriate LLM client for the currently selected provider.
     private func currentLLMClient() -> any LLMClient {
-        if isCloudMode { return CloudLLMClient() }
         let provider = KeychainService.selectedLLMProvider
         if provider == .claude {
             return ClaudeChatClient()
@@ -62,11 +58,9 @@ actor RecognitionSession {
         return DoubaoChatClient(provider: provider)
     }
 
-    /// LLM config: Cloud mode uses a dummy config (CloudLLMClient ignores it);
-    /// BYOK mode loads real credentials from KeychainService.
+    /// Load LLM credentials from KeychainService.
     private func loadEffectiveLLMConfig() -> LLMConfig? {
-        if isCloudMode { return LLMConfig(apiKey: "", model: "cloud") }
-        return KeychainService.loadLLMConfig()
+        KeychainService.loadLLMConfig()
     }
 
     /// Pre-initialize audio subsystem so the first recording starts instantly.
@@ -149,21 +143,6 @@ actor RecognitionSession {
 
         let provider = KeychainService.selectedASRProvider
         activeProvider = provider
-
-        // Cloud quota gate: refuse to start if free quota is exhausted
-        if provider == .cloud {
-            let canUse = await CloudQuotaManager.shared.canUse()
-            if !canUse {
-                SoundFeedback.playError()
-                state = .idle
-                onASREvent?(.error(NSError(
-                    domain: "Type4Me", code: -10,
-                    userInfo: [NSLocalizedDescriptionKey: L("免费额度已用完", "Free quota exhausted")]
-                )))
-                onASREvent?(.completed)
-                return
-            }
-        }
 
         let effectiveMode = ASRProviderRegistry.resolvedMode(for: mode, provider: provider)
         sessionGeneration &+= 1
@@ -438,29 +417,6 @@ actor RecognitionSession {
         let needsLLM = !currentMode.prompt.isEmpty
         let provider = activeProvider
 
-        // Kick off Soniox async calibration EARLY, in parallel with RT teardown.
-        // Grab audio now before audioEngine.stop() clears it.
-        let sonioxAsyncEnabled = provider == .soniox
-            && UserDefaults.standard.bool(forKey: "tf_sonioxAsyncCalibration")
-        var sonioxAsyncTask: Task<SonioxAsyncClient.TranscriptionResult?, Never>?
-        if sonioxAsyncEnabled, let sonioxConfig = currentConfig as? SonioxASRConfig {
-            let fullAudio = audioEngine.getRecordedAudio()
-            if !fullAudio.isEmpty {
-                let hotwords = HotwordStorage.loadEffective()
-                let bypass = ProxyBypassMode.current.bypassASR
-                let apiKey = sonioxConfig.apiKey
-                DebugFileLogger.log("stop: Soniox async kicked off early (\(fullAudio.count) bytes)")
-                sonioxAsyncTask = Task.detached {
-                    await SonioxAsyncClient.transcribe(
-                        audioData: fullAudio,
-                        apiKey: apiKey,
-                        hotwords: hotwords,
-                        bypassProxy: bypass
-                    )
-                }
-            }
-        }
-
         // ASR teardown: send endAudio and drain event stream with hard deadlines.
         // Uses detached tasks + continuation so a stuck client can't block stopRecording.
         let providerIsStreaming = ASRProviderRegistry.capabilities(for: provider).isStreaming
@@ -572,27 +528,6 @@ actor RecognitionSession {
             }
         }
         uploadFailureFlag = nil
-
-        // Await Soniox async calibration result (kicked off earlier, in parallel with RT teardown).
-        if let asyncTask = sonioxAsyncTask {
-            let rtText = currentTranscript.composedText
-            onASREvent?(.processingResult(text: rtText))
-            if let result = await asyncTask.value, !result.text.isEmpty {
-                let changed = result.text != rtText
-                DebugFileLogger.log("stop: Soniox async done, \(result.text.count) chars, changed=\(changed)")
-                if changed {
-                    NSLog("[Session] Soniox async calibration changed result")
-                }
-                currentTranscript = RecognitionTranscript(
-                    confirmedSegments: [result.text],
-                    partialText: "",
-                    authoritativeText: result.text,
-                    isFinal: true
-                )
-            } else {
-                DebugFileLogger.log("stop: Soniox async failed, using RT result")
-            }
-        }
 
         // Combine confirmed segments + any trailing unconfirmed partial.
         let effectiveText = currentTranscript.displayText
@@ -708,11 +643,12 @@ actor RecognitionSession {
                 : true
 
             // Run injection on a detached task to avoid blocking the actor with usleep().
-            // The actor yields cooperatively via withCheckedContinuation; .finalized is
-            // still emitted only after injection completes, preserving ordering.
+            // .finalized is emitted directly from the detached task so the UI updates
+            // immediately after paste, without waiting for actor re-scheduling.
             let engine = injectionEngine
             let aborted = injectionAborted
-            let injectLog = "stop: injecting method=clipboard text=[\(finalText.prefix(50))] len=\(finalText.count) +\(ContinuousClock.now - stopT0)"
+            let onEvent = self.onASREvent
+            let injectLog = "stop: injecting method=clipboard len=\(finalText.count) +\(ContinuousClock.now - stopT0)"
             let injectionOutcome: InjectionOutcome = await withCheckedContinuation { continuation in
                 Task.detached {
                     let outcome: InjectionOutcome
@@ -724,14 +660,13 @@ actor RecognitionSession {
                         DebugFileLogger.log(injectLog)
                         outcome = engine.inject(finalText)
                     }
+                    // Notify UI immediately from this thread, before actor resumes
+                    onEvent?(.finalized(text: finalText, injection: outcome))
+                    DebugFileLogger.log("stop: finalized emitted from injection task")
+                    // Clipboard restore can happen after UI is notified
+                    engine.finishClipboardRestore()
                     continuation.resume(returning: outcome)
                 }
-            }
-            onASREvent?(.finalized(text: finalText, injection: injectionOutcome))
-
-            // Cloud quota: refresh from server after LLM completes
-            if isCloudMode {
-                await CloudQuotaManager.shared.refresh(force: true)
             }
 
             // Save to history
@@ -751,7 +686,8 @@ actor RecognitionSession {
                 processedText: processedText,
                 finalText: finalText,
                 status: status,
-                characterCount: finalText.count
+                characterCount: finalText.count,
+                asrProvider: activeProvider.displayName
             ))
 
             // Note: injectionAborted and llmFailed info is already conveyed
@@ -759,24 +695,9 @@ actor RecognitionSession {
             // No separate .error emission here to avoid green→red UI flash.
 
         } else {
-            // No text recognized: save to history as failed, then exit.
+            // No text recognized: skip history entry (don't save empty records)
             let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
-            if duration > 1.0 {
-                // Only save if recording lasted more than 1 second (skip accidental taps)
-                let status = needsBatchFallback ? "stream_failed" : "empty"
-                await historyStore.insert(HistoryRecord(
-                    id: UUID().uuidString,
-                    createdAt: Date(),
-                    durationSeconds: duration,
-                    rawText: "",
-                    processingMode: currentMode == .direct ? nil : currentMode.name,
-                    processedText: nil,
-                    finalText: "",
-                    status: status,
-                    characterCount: 0
-                ))
-                DebugFileLogger.log("stop: no text recognized, saved to history as \(status)")
-            }
+            DebugFileLogger.log("stop: no text recognized (duration=\(duration)s), skipping history entry")
             onASREvent?(.processingResult(text: ""))
             onASREvent?(.completed)
         }

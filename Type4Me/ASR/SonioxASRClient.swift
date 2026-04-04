@@ -55,7 +55,7 @@ actor SonioxASRClient: SpeechRecognizer {
         eventContinuation = continuation
         _events = stream
 
-        let url = try SonioxProtocol.buildWebSocketURL(override: options.cloudProxyURL)
+        let url = try SonioxProtocol.buildWebSocketURL()
         let session = URLSession(configuration: options.urlSessionConfiguration)
         let task = session.webSocketTask(with: url)
         task.resume()
@@ -216,7 +216,7 @@ actor SonioxASRClient: SpeechRecognizer {
         emitEvent(.transcript(transcript))
 
         if transcript.isFinal, !transcript.authoritativeText.isEmpty {
-            NSLog("[Soniox] Final transcript: '%@'", transcript.authoritativeText)
+            NSLog("[Soniox] Final transcript received (%d chars)", transcript.authoritativeText.count)
         }
     }
 }

@@ -387,6 +387,13 @@ final class AppState {
     }
 
     func finalize(text: String, outcome: InjectionOutcome) {
+        // Only accept finalization while the bar is in processing state.
+        // A stale .finalized from a previous session's detached task must not
+        // overwrite a new recording that has already started.
+        guard barPhase == .processing else {
+            DebugFileLogger.log("finalize: ignored (barPhase=\(barPhase), expected .processing)")
+            return
+        }
         guard !text.isEmpty else {
             cancel()
             return
@@ -436,9 +443,10 @@ final class AppState {
     private var hideGeneration = 0
 
     private func showDone(message: String = L("已完成", "Done")) {
+        DebugFileLogger.log("showDone: barPhase → .done, message=\(message)")
         feedbackMessage = message
         barPhase = .done
-        scheduleAutoHide(for: .done, delay: .seconds(0.8))
+        scheduleAutoHide(for: .done, delay: .seconds(0.5))
     }
 
     private func scheduleAutoHide(for phase: FloatingBarPhase, delay: Duration) {
@@ -447,6 +455,7 @@ final class AppState {
         Task { @MainActor in
             try? await Task.sleep(for: delay)
             guard barPhase == phase, hideGeneration == myGeneration else { return }
+            DebugFileLogger.log("autoHide: barPhase → .hidden (was \(phase))")
             barPhase = .hidden
             onHidePanel?()
         }

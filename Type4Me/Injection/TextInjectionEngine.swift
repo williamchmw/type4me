@@ -79,9 +79,20 @@ final class TextInjectionEngine: @unchecked Sendable {
     var preserveClipboard = true
 
     /// Inject text into the currently focused input field.
+    /// Returns the outcome as soon as the paste is dispatched.
+    /// Call ``finishClipboardRestore()`` afterward to restore the original clipboard.
     func inject(_ text: String) -> InjectionOutcome {
         guard !text.isEmpty else { return .inserted }
         return injectViaClipboard(text)
+    }
+
+    /// Restore the clipboard that was saved before injection.
+    /// Safe to call even if there's nothing to restore.
+    func finishClipboardRestore() {
+        guard let pending = pendingClipboardRestore else { return }
+        pendingClipboardRestore = nil
+        usleep(50_000)
+        pending.snapshot.restore(expectedChangeCount: pending.changeCount)
     }
 
     /// Copy text to the system clipboard (used at session end).
@@ -92,6 +103,13 @@ final class TextInjectionEngine: @unchecked Sendable {
     }
 
     // MARK: - Clipboard injection
+
+    private struct PendingClipboardRestore {
+        let snapshot: ClipboardSnapshot
+        let changeCount: Int
+    }
+
+    private var pendingClipboardRestore: PendingClipboardRestore?
 
     private func injectViaClipboard(_ text: String) -> InjectionOutcome {
         let savedClipboard = preserveClipboard ? ClipboardSnapshot.capture() : nil
@@ -107,9 +125,13 @@ final class TextInjectionEngine: @unchecked Sendable {
 
         let outcome: InjectionOutcome = hasFrontmostApp ? .inserted : .copiedToClipboard
 
+        // Defer clipboard restore so .finalized can be emitted sooner
         if outcome == .inserted, let savedClipboard {
-            usleep(50_000)
-            savedClipboard.restore(expectedChangeCount: postWriteChangeCount)
+            pendingClipboardRestore = PendingClipboardRestore(
+                snapshot: savedClipboard, changeCount: postWriteChangeCount
+            )
+        } else {
+            pendingClipboardRestore = nil
         }
 
         return outcome

@@ -83,11 +83,8 @@ enum HotwordStorage {
     private static let migratedKey = "tf_hotwords_migrated_to_file_v2"
     private static let oldUDKey = "tf_hotwords"
 
-    /// Syncs built-in file with code defaults and migrates old UserDefaults data.
+    /// Migrates old UserDefaults hotwords to user file (one-time).
     static func migrateIfNeeded() {
-        // Always sync built-in file with code defaults (picks up new entries on app update)
-        saveBuiltin(defaultHotwords)
-
         guard !UserDefaults.standard.bool(forKey: migratedKey) else { return }
         defer { UserDefaults.standard.set(true, forKey: migratedKey) }
 
@@ -98,12 +95,8 @@ enum HotwordStorage {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        // Filter out entries that duplicate built-in
-        let builtinSet = Set(defaultHotwords.map { $0.lowercased() })
-        let userOnly = oldWords.filter { !builtinSet.contains($0.lowercased()) }
-
-        if !userOnly.isEmpty {
-            save(userOnly)
+        if !oldWords.isEmpty {
+            save(oldWords)
         }
     }
 
@@ -151,10 +144,10 @@ enum HotwordStorage {
         return loadBuiltin().count
     }
 
-    /// Reveal built-in hotwords file in Finder.
+    /// Reveal built-in hotwords file in Finder (creates empty file if missing).
     static func revealBuiltinInFinder() {
         if !FileManager.default.fileExists(atPath: builtinFileURL.path) {
-            saveBuiltin(defaultHotwords)
+            saveBuiltin([])
         }
         #if canImport(AppKit)
         NSWorkspace.shared.activateFileViewerSelecting([builtinFileURL])
@@ -163,20 +156,9 @@ enum HotwordStorage {
 
     // MARK: - Effective (merge both stores)
 
-    /// Returns built-in + user hotwords merged (deduplicated, case-insensitive).
+    /// Returns the user's hotwords (managed via Settings UI).
     static func loadEffective() -> [String] {
-        let builtin = loadBuiltin()
-        let user = load()
-        var seen = Set(builtin.map { $0.lowercased() })
-        var result = builtin
-        for word in user {
-            let lower = word.lowercased()
-            if !seen.contains(lower) {
-                seen.insert(lower)
-                result.append(word)
-            }
-        }
-        return result
+        return load()
     }
 
     // MARK: - Cloud-compatible words

@@ -62,27 +62,27 @@ actor ASRVariantGenerator {
             : DoubaoChatClient(provider: provider)
 
         let prompt = buildPrompt(wrong: wrong, correct: correct)
-        logger.info("Generating variants: '\(wrong)' → '\(correct)'")
+        logger.info("Local LLM: '\(wrong)' → '\(correct)'")
 
         let response: String
         do {
             response = try await client.process(text: " ", prompt: prompt, config: config)
         } catch {
-            logger.error("LLM call failed: \(error.localizedDescription)")
+            logger.error("Local LLM failed: \(error.localizedDescription)")
             throw GenerationError.llmFailed(error.localizedDescription)
         }
 
         guard let result = parseResponse(response, correct: correct) else {
-            logger.error("Failed to parse response: \(response.prefix(200))")
+            logger.error("Failed to parse: \(response.prefix(200))")
             throw GenerationError.parseFailed
         }
 
         let deduped = deduplicate(result)
-        logger.info("Generated \(deduped.snippets.count) snippets, \(deduped.hotwords.count) hotwords")
+        logger.info("Local: \(deduped.snippets.count) snippets, \(deduped.hotwords.count) hotwords")
         return deduped
     }
 
-    // MARK: - Prompt
+    // MARK: - LLM Prompt
 
     func buildPrompt(wrong: String, correct: String) -> String {
         """
@@ -115,10 +115,9 @@ actor ASRVariantGenerator {
         """
     }
 
-    // MARK: - Parse
+    // MARK: - LLM Parse
 
     func parseResponse(_ response: String, correct: String) -> GenerationResult? {
-        // Extract JSON object from response (handles markdown fences)
         guard let match = response.range(of: #"\{[\s\S]*\}"#, options: .regularExpression),
               let data = response[match].data(using: .utf8)
         else { return nil }
@@ -155,19 +154,16 @@ actor ASRVariantGenerator {
     // MARK: - Deduplicate
 
     func deduplicate(_ result: GenerationResult) -> GenerationResult {
-        // Normalize helper: lowercase + strip whitespace
         func norm(_ s: String) -> String {
             s.filter { !$0.isWhitespace }.lowercased()
         }
 
-        // Collect existing snippet triggers
         let userSnippets = SnippetStorage.load()
         let builtinSnippets = SnippetStorage.loadBuiltin()
         let existingTriggers = Set(
             (userSnippets + builtinSnippets).map { norm($0.trigger) }
         )
 
-        // Mark duplicate snippets
         var snippets = result.snippets
         for i in snippets.indices {
             if existingTriggers.contains(norm(snippets[i].trigger)) {
@@ -176,14 +172,12 @@ actor ASRVariantGenerator {
             }
         }
 
-        // Collect existing hotwords
         let userHotwords = HotwordStorage.load()
         let builtinHotwords = HotwordStorage.loadBuiltin()
         let existingHotwords = Set(
             (userHotwords + builtinHotwords).map { $0.lowercased() }
         )
 
-        // Mark duplicate hotwords
         var hotwords = result.hotwords
         for i in hotwords.indices {
             if existingHotwords.contains(hotwords[i].word.lowercased()) {

@@ -40,8 +40,8 @@ enum SonioxProtocol {
     private static let endpoint = "wss://stt-rt.soniox.com/transcribe-websocket"
     private static let ignoredMarkerTokens: Set<String> = ["<end>", "<fin>"]
 
-    static func buildWebSocketURL(override: String? = nil) throws -> URL {
-        let urlString = override ?? endpoint
+    static func buildWebSocketURL() throws -> URL {
+        let urlString = endpoint
         guard let url = URL(string: urlString) else {
             throw SonioxProtocolError.invalidEndpoint
         }
@@ -52,7 +52,6 @@ enum SonioxProtocol {
         config: SonioxASRConfig,
         options: ASRRequestOptions
     ) throws -> String {
-        let isCloudProxy = options.cloudProxyURL != nil
         var payload: [String: Any] = [
             "model": config.model,
             "audio_format": "pcm_s16le",
@@ -63,10 +62,7 @@ enum SonioxProtocol {
             "language_hints": ["zh", "en"],
             "language_hints_strict": true,
         ]
-        // Only include api_key for direct connections, not cloud proxy
-        if !isCloudProxy {
-            payload["api_key"] = config.apiKey
-        }
+        payload["api_key"] = config.apiKey
 
         let terms = sanitizedTerms(from: options.hotwords)
         if !terms.isEmpty {

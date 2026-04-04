@@ -51,6 +51,11 @@ struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var selectedTab: SettingsTab = .general
     @AppStorage("tf_language") private var language = AppLanguage.systemDefault
+    @AppStorage("tf_app_edition") private var editionRaw: String?
+
+    private var edition: AppEdition? {
+        editionRaw.flatMap { AppEdition(rawValue: $0) }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -63,7 +68,7 @@ struct SettingsView: View {
         .background(TF.settingsBg)
         .preferredColorScheme(.light)
         .onAppear {
-            if selectedTab == .models && AppEditionMigration.current == .member {
+            if selectedTab == .models && edition == .member {
                 selectedTab = .general
             }
         }
@@ -95,7 +100,7 @@ struct SettingsView: View {
 
             // Nav items
             VStack(spacing: 2) {
-                ForEach(SettingsTab.tabs(for: AppEditionMigration.current)) { tab in
+                ForEach(SettingsTab.tabs(for: edition)) { tab in
                     navItem(tab)
                 }
             }
@@ -154,7 +159,7 @@ struct SettingsView: View {
     private var content: some View {
         ZStack {
             tabPage(.general)    { GeneralSettingsTab() }
-            if AppEditionMigration.current != .member {
+            if edition != .member {
                 tabPage(.models) { ModelSettingsTab() }
             }
             tabPage(.vocabulary) { VocabularyTab() }

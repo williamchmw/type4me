@@ -35,4 +35,22 @@ enum AppEditionMigration {
             UserDefaults.standard.set(newValue?.rawValue, forKey: editionKey)
         }
     }
+
+    /// Switch edition with provider side-effects.
+    static func switchTo(_ edition: AppEdition) {
+        // Save current BYOK provider before switching away
+        if current == .byoKey {
+            let currentProvider = KeychainService.selectedASRProvider
+            if currentProvider != .cloud {
+                KeychainService.lastBYOKProvider = currentProvider
+            }
+        }
+        current = edition
+        switch edition {
+        case .member:
+            KeychainService.selectedASRProvider = .cloud
+        case .byoKey:
+            KeychainService.selectedASRProvider = KeychainService.lastBYOKProvider
+        }
+    }
 }

@@ -523,10 +523,7 @@ struct SetupWizardView: View {
             Spacer()
 
             Button(L("开始使用", "Start Using")) {
-                AppEditionMigration.current = selectedEdition
-                if selectedEdition == .member {
-                    KeychainService.selectedASRProvider = .cloud
-                }
+                AppEditionMigration.switchTo(selectedEdition)
                 appState.hasCompletedSetup = true
                 NSApp.keyWindow?.close()
             }

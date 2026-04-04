@@ -5,8 +5,11 @@ struct SidebarEditionCard: View {
     @ObservedObject private var quota = CloudQuotaManager.shared
     @State private var showSwitchConfirm = false
     @State private var showLoginAlert = false
+    @AppStorage("tf_app_edition") private var editionRaw: String?
 
-    private var edition: AppEdition? { AppEditionMigration.current }
+    private var edition: AppEdition? {
+        editionRaw.flatMap { AppEdition(rawValue: $0) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -150,10 +153,6 @@ struct SidebarEditionCard: View {
     }
 
     private func performSwitch() {
-        let target = switchTarget
-        AppEditionMigration.current = target
-        if target == .member {
-            KeychainService.selectedASRProvider = .cloud
-        }
+        AppEditionMigration.switchTo(switchTarget)
     }
 }

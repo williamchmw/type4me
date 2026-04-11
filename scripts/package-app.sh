@@ -166,18 +166,22 @@ if [ "$VARIANT" = "local" ]; then
     fi
 
     # qwen3-asr-server (PyInstaller dist, ~230MB)
+    # Placed in Contents/Resources/ (not MacOS/) to avoid codesign treating
+    # PyInstaller internals (.dist-info, python3.x dirs) as nested bundles.
     QWEN3_DIST="$PROJECT_DIR/qwen3-asr-server/dist/qwen3-asr-server"
     if [ -d "$QWEN3_DIST" ]; then
         echo "Bundling qwen3-asr-server..."
-        rm -rf "$APP_PATH/Contents/MacOS/qwen3-asr-server-dist" "$APP_PATH/Contents/MacOS/qwen3-asr-server"
-        cp -R "$QWEN3_DIST" "$APP_PATH/Contents/MacOS/qwen3-asr-server-dist"
+        rm -rf "$APP_PATH/Contents/Resources/qwen3-asr-server-dist" "$APP_PATH/Contents/MacOS/qwen3-asr-server"
+        cp -R "$QWEN3_DIST" "$APP_PATH/Contents/Resources/qwen3-asr-server-dist"
         cat > "$APP_PATH/Contents/MacOS/qwen3-asr-server" << 'WRAPPER'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-exec "$DIR/qwen3-asr-server-dist/qwen3-asr-server" "$@"
+exec "$DIR/../Resources/qwen3-asr-server-dist/qwen3-asr-server" "$@"
 WRAPPER
         chmod +x "$APP_PATH/Contents/MacOS/qwen3-asr-server"
-        find "$APP_PATH/Contents/MacOS/qwen3-asr-server-dist" -type f \( -name "*.dylib" -o -name "*.so" -o -name "*.metallib" -o -perm +111 \) \
+        # Remove .dist-info dirs that confuse codesign's bundle detection
+        find "$APP_PATH/Contents/Resources/qwen3-asr-server-dist" -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+        find "$APP_PATH/Contents/Resources/qwen3-asr-server-dist" -type f \( -name "*.dylib" -o -name "*.so" -o -name "*.metallib" -o -perm +111 \) \
             -exec codesign --force --options runtime --timestamp --sign "${SIGNING_IDENTITY}" {} \; 2>/dev/null || true
         echo "qwen3-asr-server bundled and signed."
     else
@@ -205,39 +209,25 @@ fi
 
 if [ "$NEEDS_SIGN" = "1" ]; then
     echo "Signing with '${SIGNING_IDENTITY}'..."
-    # PyInstaller dist dirs contain .dylibs and dist-info dirs that confuse
-    # codesign's bundle detection. Move server files out temporarily.
-    SERVER_TEMP=""
-    Q3_DIST="$APP_PATH/Contents/MacOS/qwen3-asr-server-dist"
-    Q3_WRAPPER="$APP_PATH/Contents/MacOS/qwen3-asr-server"
-    if [ -d "$Q3_DIST" ] || [ -f "$Q3_WRAPPER" ]; then
-        SERVER_TEMP="$(mktemp -d)"
-        [ -d "$Q3_DIST" ] && mv "$Q3_DIST" "$SERVER_TEMP/qwen3-asr-server-dist"
-        [ -f "$Q3_WRAPPER" ] && mv "$Q3_WRAPPER" "$SERVER_TEMP/qwen3-asr-server"
-    fi
 
     # Sign frameworks and dylibs first (inside-out signing)
-    find "$APP_PATH/Contents/Frameworks" "$APP_PATH/Contents/Resources" \
+    find "$APP_PATH/Contents/Frameworks" \
         -type f \( -name "*.dylib" -o -name "*.so" -o -name "*.framework" \) \
         -exec codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" {} \; 2>/dev/null || true
+
+    # Sign the wrapper script in Contents/MacOS
+    Q3_WRAPPER="$APP_PATH/Contents/MacOS/qwen3-asr-server"
+    if [ -f "$Q3_WRAPPER" ]; then
+        codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$Q3_WRAPPER"
+    fi
 
     # Sign the main app bundle with hardened runtime + entitlements
     CODESIGN_ARGS=(--force --options runtime --timestamp --sign "$SIGNING_IDENTITY")
     if [ -f "$ENTITLEMENTS" ]; then
         CODESIGN_ARGS+=(--entitlements "$ENTITLEMENTS")
     fi
-    codesign "${CODESIGN_ARGS[@]}" "$APP_PATH" 2>/dev/null && echo "Signed." || echo "Signing skipped (no identity available)."
-
-    if [ -n "$SERVER_TEMP" ]; then
-        [ -d "$SERVER_TEMP/qwen3-asr-server-dist" ] && mv "$SERVER_TEMP/qwen3-asr-server-dist" "$Q3_DIST"
-        [ -f "$SERVER_TEMP/qwen3-asr-server" ] && mv "$SERVER_TEMP/qwen3-asr-server" "$Q3_WRAPPER"
-        rm -rf "$SERVER_TEMP"
-        # Re-sign qwen3-asr-server components
-        find "$Q3_DIST" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) \
-            -exec codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" {} \; 2>/dev/null || true
-        # Re-sign the whole bundle after restoring server files
-        codesign "${CODESIGN_ARGS[@]}" "$APP_PATH" 2>/dev/null || true
-    fi
+    codesign "${CODESIGN_ARGS[@]}" "$APP_PATH" && echo "Signed." || echo "Signing skipped (no identity available)."
+    codesign --verify --strict "$APP_PATH" && echo "Signature verified." || { echo "ERROR: Signature verification failed"; exit 1; }
 fi
 
 echo "Variant: $VARIANT | Arch: $ARCH"

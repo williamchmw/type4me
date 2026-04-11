@@ -40,9 +40,9 @@ final class AppUpdater {
     // MARK: - Init
 
     init() {
-        let macosURL = Bundle.main.executableURL?.deletingLastPathComponent()
+        let resourcesURL = Bundle.main.resourceURL
         isLocalInstallation = FileManager.default.fileExists(
-            atPath: macosURL?.appendingPathComponent("qwen3-asr-server-dist").path ?? ""
+            atPath: resourcesURL?.appendingPathComponent("qwen3-asr-server-dist").path ?? ""
         )
     }
 
@@ -379,9 +379,8 @@ final class AppUpdater {
         if [ "$IS_LOCAL" = "1" ]; then
             TEMP_LOCAL="$(mktemp -d)"
             echo "Preserving local components to $TEMP_LOCAL..."
-            for item in qwen3-asr-server-dist qwen3-asr-server; do
-                [ -e "$APP_PATH/Contents/MacOS/$item" ] && mv "$APP_PATH/Contents/MacOS/$item" "$TEMP_LOCAL/"
-            done
+            [ -d "$APP_PATH/Contents/Resources/qwen3-asr-server-dist" ] && mv "$APP_PATH/Contents/Resources/qwen3-asr-server-dist" "$TEMP_LOCAL/"
+            [ -f "$APP_PATH/Contents/MacOS/qwen3-asr-server" ] && mv "$APP_PATH/Contents/MacOS/qwen3-asr-server" "$TEMP_LOCAL/"
             [ -d "$APP_PATH/Contents/Resources/Models" ] && mv "$APP_PATH/Contents/Resources/Models" "$TEMP_LOCAL/"
         fi
 
@@ -393,37 +392,16 @@ final class AppUpdater {
         # Restore local components
         if [ "$IS_LOCAL" = "1" ] && [ -n "$TEMP_LOCAL" ] && [ -d "$TEMP_LOCAL" ]; then
             echo "Restoring local components..."
-            for item in qwen3-asr-server-dist qwen3-asr-server; do
-                [ -e "$TEMP_LOCAL/$item" ] && mv "$TEMP_LOCAL/$item" "$APP_PATH/Contents/MacOS/"
-            done
+            [ -d "$TEMP_LOCAL/qwen3-asr-server-dist" ] && mv "$TEMP_LOCAL/qwen3-asr-server-dist" "$APP_PATH/Contents/Resources/"
+            [ -f "$TEMP_LOCAL/qwen3-asr-server" ] && mv "$TEMP_LOCAL/qwen3-asr-server" "$APP_PATH/Contents/MacOS/"
             [ -d "$TEMP_LOCAL/Models" ] && mv "$TEMP_LOCAL/Models" "$APP_PATH/Contents/Resources/"
             rm -rf "$TEMP_LOCAL"
         fi
 
-        # Code sign only if a real signing identity is available (not ad-hoc).
-        # The DMG already contains a properly signed app; re-signing with "-"
-        # would strip the original signature and trigger Gatekeeper "damaged" errors.
-        if [ "$SIGNING_IDENTITY" != "-" ] && [ -n "$SIGNING_IDENTITY" ]; then
-            echo "Signing with identity: $SIGNING_IDENTITY"
-            SERVER_TEMP=""
-            if [ -d "$APP_PATH/Contents/MacOS/qwen3-asr-server-dist" ]; then
-                SERVER_TEMP="$(mktemp -d)"
-                for item in qwen3-asr-server-dist qwen3-asr-server; do
-                    [ -e "$APP_PATH/Contents/MacOS/$item" ] && mv "$APP_PATH/Contents/MacOS/$item" "$SERVER_TEMP/"
-                done
-            fi
-
-            codesign -f -s "$SIGNING_IDENTITY" "$APP_PATH" 2>&1 || echo "Warning: signing failed, continuing..."
-
-            if [ -n "$SERVER_TEMP" ] && [ -d "$SERVER_TEMP" ]; then
-                for item in qwen3-asr-server-dist qwen3-asr-server; do
-                    [ -e "$SERVER_TEMP/$item" ] && mv "$SERVER_TEMP/$item" "$APP_PATH/Contents/MacOS/"
-                done
-                rm -rf "$SERVER_TEMP"
-            fi
-        else
-            echo "Skipping code signing (no developer identity, preserving original signature)"
-        fi
+        # Skip re-signing: the DMG contains a properly notarized app.
+        # Re-signing would strip the original signature and may trigger
+        # Gatekeeper issues. The restored local files in Contents/Resources/
+        # don't invalidate the seal since they're outside Contents/MacOS/.
 
         # Remove quarantine
         xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true

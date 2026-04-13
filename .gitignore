@@ -42,6 +42,9 @@ sensevoice-server/.venv/
 # Large model files
 sensevoice-server/models/
 
+# Windows (removed, macOS-only project)
+windows/
+
 # Test artifacts
 test-audio/
 test*.txt

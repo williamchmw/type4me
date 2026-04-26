@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.9.3 — 历史性能修复 + 代办模式 (2026-04-26)
+
+### 新功能
+- **代办模式 / Handle It**：直接交付型 AI 助手，把语音口述当成需求指令而非待润色文本。覆盖邮件、即时消息、代码、翻译等多种场景，强制只输出最终成品（无引导语、无反问、信息不全用 `[占位符]` 标出）
+
+### Bug 修复
+- **历史记录卡顿、白屏、内存持续上涨 (#144)**：bjzhush 反馈在历史记录里翻动 1 分钟内内存达 1+ GB。三层叠加根因：
+  - `LazyVStack` 嵌套普通 `VStack/ForEach`，某天的所有 record cards 一次性 instantiated（不是真 lazy）
+  - `groupedRecords` / `filtered` 是 computed property，每次 body 求值都重新 filter + group + sort
+  - `ProgressView` 用 `.id("load-more-\(records.count)")` + `onAppear`，加载完触发 view 重建再次触发 onAppear，可能死循环加载到底
+- **浮窗 hover 状态泄漏**：NSTrackingArea 在 panel hidden 时挂起事件不触发 mouseExited，`isHovered` 跨录音 session 保留，导致下次开始录音误弹悬浮预览
+
+### 工程改进
+- 订阅功能（official variant）归档：`Type4Me/CloudSubscription/marker` 永久重命名，默认构建走 pure 路径，public GitHub Release 只发 pure + local 两个变体
+
 ## v1.9.2 — 授权引导重做 + 历史日期筛选 (2026-04-17)
 
 ### 新功能

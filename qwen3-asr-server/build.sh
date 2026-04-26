@@ -39,8 +39,15 @@ if [ "$QUICK" = "0" ]; then
     # Install MLX from source with JIT mode for backward compatibility.
     # This compiles Metal kernels at runtime, adapting to the host's Metal
     # version instead of shipping a pre-compiled metallib tied to one OS.
+    #
+    # Pin to a specific git tag instead of `pip install mlx --no-binary mlx`:
+    # PyPI no longer ships an mlx source distribution (only wheels), so
+    # --no-binary fails with "No matching distribution found for mlx".
+    # Pulling directly from the GitHub tag bypasses that and is decoupled
+    # from PyPI's distribution policy. v0.31.0 matches the version shipped
+    # in v1.9.2's local DMG (verified: identical 2,855,435-byte metallib).
     CMAKE_ARGS="-DMLX_METAL_JIT=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=$MIN_MACOS" \
-        pip install mlx --no-binary mlx --force-reinstall --no-deps
+        pip install "git+https://github.com/ml-explore/mlx.git@v0.31.0" --no-deps
 
     echo "=== [qwen3-asr-server] Installing remaining dependencies ==="
     pip install -r requirements.txt

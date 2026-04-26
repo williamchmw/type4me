@@ -77,6 +77,7 @@ struct HistoryTab: View {
     private let historyStore = HistoryStore()
 
     @State private var records: [HistoryRecord] = []
+    @State private var sections: [DateSection] = []
     @State private var hasMore = true
     @State private var isLoadingMore = false
     @State private var searchText = ""
@@ -112,18 +113,17 @@ struct HistoryTab: View {
     @State private var selectedIds: Set<String> = []
     @State private var showBatchDeleteConfirm = false
 
-    private var filtered: [HistoryRecord] {
-        if searchText.isEmpty { return records }
-        return records.filter {
-            $0.finalText.localizedCaseInsensitiveContains(searchText)
-            || $0.rawText.localizedCaseInsensitiveContains(searchText)
-        }
+    /// All record ids currently visible in the list (after search filter).
+    /// Backed by the cached `sections`, so this is O(n) over loaded records
+    /// only when accessed (toolbar buttons), not on every body re-render.
+    private var visibleIds: Set<String> {
+        Set(sections.flatMap { $0.records.map(\.id) })
     }
 
     /// True when every row in the current list (loaded + search filter) is selected.
     private var isAllFilteredSelected: Bool {
         HistorySelectionHelpers.isAllFilteredSelected(
-            filteredIds: Set(filtered.map(\.id)),
+            filteredIds: visibleIds,
             selectedIds: selectedIds
         )
     }
@@ -156,11 +156,34 @@ struct HistoryTab: View {
         }
     }
 
-    private var groupedRecords: [(DayGroup, [HistoryRecord])] {
+    /// One day's worth of records, used as a `LazyVStack` `Section` so each
+    /// header and row stays lazy. Identified by the day's start date.
+    private struct DateSection: Identifiable {
+        let id: Date
+        let group: DayGroup
+        let records: [HistoryRecord]
+    }
+
+    /// Recomputes `sections` from the current `records` and `searchText`.
+    /// Called on data-changing events (record load, search change) so the
+    /// view body never has to re-filter / re-group / re-sort during scroll.
+    private func recomputeSections() {
+        let baseRecords: [HistoryRecord]
+        if searchText.isEmpty {
+            baseRecords = records
+        } else {
+            baseRecords = records.filter {
+                $0.finalText.localizedCaseInsensitiveContains(searchText)
+                || $0.rawText.localizedCaseInsensitiveContains(searchText)
+            }
+        }
         let cal = Calendar.current
-        let grouped = Dictionary(grouping: filtered) { DayGroup(date: cal.startOfDay(for: $0.createdAt)) }
-        return grouped.map { ($0.key, $0.value) }
-            .sorted { $0.0.date > $1.0.date }
+        let grouped = Dictionary(grouping: baseRecords) {
+            DayGroup(date: cal.startOfDay(for: $0.createdAt))
+        }
+        sections = grouped
+            .map { DateSection(id: $0.key.date, group: $0.key, records: $0.value) }
+            .sorted { $0.id > $1.id }
     }
 
     // MARK: - Body
@@ -307,16 +330,31 @@ struct HistoryTab: View {
 
             if records.isEmpty {
                 emptyState
-            } else if filtered.isEmpty {
+            } else if sections.isEmpty {
                 Text(L("没有匹配的记录", "No matching records"))
                     .font(.system(size: 12))
                     .foregroundStyle(TF.settingsTextTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 20) {
-                        ForEach(groupedRecords, id: \.0) { group, groupRecords in
-                            dateSectionView(group, records: groupRecords)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(sections) { section in
+                            Section {
+                                ForEach(section.records) { record in
+                                    recordCard(
+                                        record,
+                                        showDate: false,
+                                        isSelectionMode: isSelectionMode,
+                                        isSelected: selectedIds.contains(record.id),
+                                        onToggleSelection: { toggleSelection(for: record.id) }
+                                    )
+                                    .padding(.bottom, 8)
+                                }
+                            } header: {
+                                sectionHeaderView(section)
+                                    .padding(.top, section.id == sections.first?.id ? 0 : 12)
+                                    .padding(.bottom, 8)
+                            }
                         }
 
                         if hasMore && searchText.isEmpty {
@@ -324,8 +362,8 @@ struct HistoryTab: View {
                                 .controlSize(.small)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
-                                .id("load-more-\(records.count)")
                                 .onAppear {
+                                    guard !isLoadingMore else { return }
                                     Task { await loadMore() }
                                 }
                         }
@@ -358,6 +396,10 @@ struct HistoryTab: View {
         }
         .onChange(of: searchText) { _, _ in
             selectedIds.removeAll()
+            recomputeSections()
+        }
+        .onChange(of: records) { _, _ in
+            recomputeSections()
         }
         .onReceive(NotificationCenter.default.publisher(for: .historyStoreDidChange)) { _ in
             guard isActive else { return }
@@ -394,7 +436,7 @@ struct HistoryTab: View {
 
             Button {
                 selectedIds = HistorySelectionHelpers.togglingSelectAllInFiltered(
-                    filteredIds: Set(filtered.map(\.id)),
+                    filteredIds: visibleIds,
                     selectedIds: selectedIds
                 )
             } label: {
@@ -407,7 +449,7 @@ struct HistoryTab: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(TF.settingsNavActive)
-            .disabled(filtered.isEmpty)
+            .disabled(sections.isEmpty)
 
             Button {
                 showBatchDeleteConfirm = true
@@ -533,39 +575,30 @@ struct HistoryTab: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Date Section
+    // MARK: - Date Section Header
 
-    private func dateSectionView(_ group: DayGroup, records: [HistoryRecord]) -> some View {
-        let totalDuration = records.reduce(0.0) { $0 + $1.durationSeconds }
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                Text(group.title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(TF.settingsTextTertiary)
-                Text("·")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TF.settingsTextTertiary.opacity(0.4))
-                Text(L("\(records.count) 条", "\(records.count)"))
-                    .font(.system(size: 10))
-                    .foregroundStyle(TF.settingsTextTertiary.opacity(0.6))
-                Text("·")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TF.settingsTextTertiary.opacity(0.4))
-                Text(formatDuration(totalDuration))
-                    .font(.system(size: 10))
-                    .foregroundStyle(TF.settingsTextTertiary.opacity(0.6))
-            }
-
-            ForEach(records) { record in
-                recordCard(
-                    record,
-                    showDate: false,
-                    isSelectionMode: isSelectionMode,
-                    isSelected: selectedIds.contains(record.id),
-                    onToggleSelection: { toggleSelection(for: record.id) }
-                )
-            }
+    private func sectionHeaderView(_ section: DateSection) -> some View {
+        let totalDuration = section.records.reduce(0.0) { $0 + $1.durationSeconds }
+        let count = section.records.count
+        return HStack(spacing: 4) {
+            Text(section.group.title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(TF.settingsTextTertiary)
+            Text("·")
+                .font(.system(size: 11))
+                .foregroundStyle(TF.settingsTextTertiary.opacity(0.4))
+            Text(L("\(count) 条", "\(count)"))
+                .font(.system(size: 10))
+                .foregroundStyle(TF.settingsTextTertiary.opacity(0.6))
+            Text("·")
+                .font(.system(size: 11))
+                .foregroundStyle(TF.settingsTextTertiary.opacity(0.4))
+            Text(formatDuration(totalDuration))
+                .font(.system(size: 10))
+                .foregroundStyle(TF.settingsTextTertiary.opacity(0.6))
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Export Popover
